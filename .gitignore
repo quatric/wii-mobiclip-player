@@ -1,0 +1,7 @@
+*.o
+*.d
+*.elf
+*.dol
+build/
+portlibs/
+.DS_Store

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>Wii Mobiclip Player</name>
+  <coder>quatric</coder>
+  <version>1.0</version>
+  <release_date>20260628000000</release_date>
+  <short_description>Play Mobiclip videos on Wii</short_description>
+  <long_description>A Wii homebrew app that
+plays Wii Mobiclip files directly on hardware. No transcoding is used, every video is
+decoded on the Wii. It supports ADPCM, FastAudio, PCM, and Vorbis audio.
+
+Controls:
+
+Browser:
+- **+Control Pad Up/Down** — move selection
+- **A** — open folder / play file
+- **B** — parent folder
+- **HOME** — exit
+
+During playback:
+- **A** / **+** — pause / resume
+- **B** / **HOME** — stop, back to browser</long_description>
+</app>
