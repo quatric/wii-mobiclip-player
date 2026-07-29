@@ -15,6 +15,7 @@
 #include "mo_audio.h"
 #include "mo_vorbis.h"
 #include "mobi_dec.h"
+#include "rgb_source.h"
 #include "input.h"
 
 /* ------------------------------------------------------------------ */
@@ -40,10 +41,11 @@ static int has_ext(const char *s, const char *ext)
     return 1;
 }
 
-/* playable: .mo (Mobiclip) */
+/* playable: .mo (Mobiclip), plus KWZ/PPM Flipnotes and THP */
 static int is_playable(const char *s)
 {
-    return has_ext(s, ".mo");
+    return has_ext(s, ".mo")  || has_ext(s, ".kwz") ||
+           has_ext(s, ".ppm") || has_ext(s, ".thp");
 }
 
 static int cmp_entry(const void *a, const void *b)
@@ -60,7 +62,7 @@ static void scan_dir(const char *path)
     if (!d) return;
     struct dirent *e;
     while ((e = readdir(d)) && n_entries < MAX_ENTRIES) {
-        if (!strcmp(e->d_name, ".")) continue;
+        if (e->d_name[0] == '.' && strcmp(e->d_name, "..")) continue;  /* hide dotfiles */
         char full[1024];
         snprintf(full, sizeof(full), "%s/%s", path, e->d_name);
         struct stat st;
@@ -264,10 +266,103 @@ static void play_file(const char *path)
     mo_demux_close(&mux);
 }
 
+/* Shared playback loop for packed-RGB24 sources (KWZ / PPM / THP). Audio is
+ * already pre-decoded into src->audio by the opener; we stream it against the
+ * hardware retrace clock exactly like play_file() does for the .mo path. */
+static void play_rgb(RgbSource *src)
+{
+    int has_audio = src->audio && src->audio_samples > 0;
+    int ach = src->channels > 0 ? src->channels : 1;
+    long vtotal = has_audio ? src->audio_samples : 0, vpos = 0;
+    int frame_size = src->w * src->h * 3;
+    uint8_t *rgb = malloc(frame_size);
+    if (!rgb) return;
+
+    if (has_audio) audio_out_start(src->sample_rate);
+
+    double fps = src->fps > 0.01 ? src->fps : 30.0;
+    int period_us = (int)(1000000.0 / fps);
+    int hz = vid_refresh_hz();
+    int vspf = (int)(((long long)period_us * hz + 500000) / 1000000);
+    if (vspf < 1) vspf = 1;
+
+    vid_clear_both();
+    long long start_retrace = vid_retraces();
+    int stop = 0, paused = 0, frame = 0;
+
+    while (!stop) {
+        while (paused && !stop) {
+            u32 pb = input_down();
+            long long ideal = (long long)frame * period_us * hz / 1000000;
+            if (pb & (WPAD_BUTTON_A | WPAD_BUTTON_PLUS)) { paused = 0; start_retrace = vid_retraces() - ideal; }
+            if (pb & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) stop = 1;
+            VIDEO_WaitVSync();
+        }
+        if (stop) break;
+
+        long long ideal_retrace = (long long)frame * period_us * hz / 1000000;
+        long target = start_retrace + ideal_retrace;
+
+        if (src->get_frame(src, frame, rgb) == 0) {
+            int drop = (int)(vid_retraces() - target) > vspf;
+            if (!drop) {
+                vid_draw_rgb24(rgb, src->w, src->h);
+                vid_flip();
+            }
+        }
+
+        if (has_audio && vpos < vtotal) {
+            long long current_retrace = vid_retraces() - start_retrace;
+            long ideal_pos = (long)(current_retrace * src->sample_rate / hz);
+            long target_pos = ideal_pos + src->sample_rate / 4;
+            if (target_pos > vtotal) target_pos = vtotal;
+            long n = target_pos - vpos;
+            if (n > 0) {
+                int space = audio_out_space();
+                if (n > space) n = space;
+                if (n > 0) {
+                    push_stereo(src->audio + vpos * ach, (int)n, ach);
+                    vpos += n;
+                }
+            }
+        }
+
+        long long current_retrace = vid_retraces() - start_retrace;
+        while (current_retrace < ideal_retrace) {
+            vid_vsync();
+            current_retrace = vid_retraces() - start_retrace;
+        }
+
+        u32 b = input_down();
+        if (b & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) stop = 1;
+        if (b & (WPAD_BUTTON_A | WPAD_BUTTON_PLUS)) paused = 1;
+        frame++;
+
+        if (frame >= src->frame_count) {
+            if (!src->loops) break;         /* PPM/KWZ loop; others stop */
+            frame = 0; vpos = 0;
+            start_retrace = vid_retraces();  /* restart the clock for the loop */
+        }
+    }
+
+    if (has_audio) audio_out_stop();
+    src->close(src);
+    free(rgb);
+}
+
 /* dispatch by extension */
 static void play_any(const char *path)
 {
-    play_file(path);
+    RgbSource src;
+    if (has_ext(path, ".kwz")) {
+        if (kwz_open(&src, path) == 0) play_rgb(&src);
+    } else if (has_ext(path, ".ppm")) {
+        if (ppm_open(&src, path) == 0) play_rgb(&src);
+    } else if (has_ext(path, ".thp")) {
+        if (thp_open(&src, path) == 0) play_rgb(&src);
+    } else {
+        play_file(path);
+    }
 }
 
 /* ------------------------------------------------------------------ */
