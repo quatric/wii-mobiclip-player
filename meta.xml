@@ -12,12 +12,12 @@ decoded on the Wii. It supports ADPCM, FastAudio, PCM, and Vorbis audio.
 Controls:
 
 Browser:
-- **+Control Pad Up/Down** — move selection
-- **A** — open folder / play file
-- **B** — parent folder
-- **HOME** — exit
+- +Control Pad Up/Down - move selection
+- A - open folder / play file
+- B - parent folder
+- HOME - exit
 
 During playback:
-- **A** / **+** — pause / resume
-- **B** / **HOME** — stop, back to browser</long_description>
+- A / + - pause / resume
+- B / HOME - stop, back to browser</long_description>
 </app>

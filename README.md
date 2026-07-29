@@ -2,6 +2,9 @@
 
 A Wii homebrew app that plays Wii Mobiclip files directly on hardware. No transcoding is used, every video is decoded on the Wii. It supports ADPCM, FastAudio, PCM, and Vorbis audio.
 
+It also plays **KWZ** (Flipnote Studio 3D) and **PPM** (Flipnote Studio DS)
+animations and **THP** (GameCube/Wii) video, each decoded on-device with audio.
+
 ## What's inside
 
 | Component | File | Notes |
@@ -11,7 +14,12 @@ A Wii homebrew app that plays Wii Mobiclip files directly on hardware. No transc
 | Container demuxer | `source/mo_demux.{c,h}` | Parses the `.mo` (`MOC5`) header and chunk stream from a `FILE*`. Ported from FFmpeg `libavformat/modec.c`. |
 | Audio decoder | `source/mo_audio.{c,h}` | PCM s16, IMA Mobiclip-Wii ADPCM, and FastAudio → native int16. |
 | Vorbis decoder | `source/mo_vorbis.{c,h}` | Ogg Vorbis (`AV` sections) via Tremor (libvorbisidec), both the retail single-packet and `[0xFFFF]` multi-packet section forms. |
-| App / browser | `source/main.c` | libfat SD browser + playback loop with WPAD input. |
+| KWZ decoder | `source/kwz_dec.c` | Flipnote Studio 3D `.kwz` → RGB24 + mixed mono ADPCM audio @ 32768 Hz. Port of `libavformat/kwzdec.c`. |
+| PPM decoder | `source/ppm_dec.c` | Flipnote Studio DS `.ppm` → RGB24 + mixed mono ADPCM audio @ 32768 Hz. Port of `libavformat/ppmflipdec.c`. |
+| THP decoder | `source/thp_dec.c` | THP container + DSP/THP ADPCM audio (from `libavcodec/adpcm.c`); video is baseline MJPEG via the bundled NanoJPEG in THP unescaped-scan mode. |
+| JPEG decoder | `source/nanojpeg.{c,h}` | Martin Fiedler's NanoJPEG (MIT), patched with an unescaped-scan mode for THP's non-byte-stuffed entropy data. |
+| RGB source API | `source/rgb_source.h` | Common interface (`kwz_open`/`ppm_open`/`thp_open`) driven by the shared `play_rgb()` loop in `main.c`. |
+| App / browser | `source/main.c` | libfat SD browser + playback loop with WPAD input; dispatches `.mo` vs the packed-RGB24 formats by extension. |
 
 Color space is chosen **per frame** from the bitstream `moflex` flag:
 `moflex=0` → YCgCo (`R=Y+U-V, G=Y+V, B=Y-U-V`); `moflex=1` → limited-range
