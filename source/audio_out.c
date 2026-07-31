@@ -61,7 +61,11 @@ void audio_out_start(int sample_rate)
     blk_cur = 0;
     faded = 0;
 
-    ASND_Init();
+    /* ASND_Init() resets the DSP/IRQ state and is only meant to be called
+     * once per process; calling it again on every replay silently breaks
+     * the voice double-buffering callback, so guard it here. */
+    static int asnd_inited = 0;
+    if (!asnd_inited) { ASND_Init(); asnd_inited = 1; }
     ASND_Pause(0);
 
     /* prime both blocks with silence, start the voice */
