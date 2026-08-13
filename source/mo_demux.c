@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "mo_demux.h"
 
 /* ---- little-endian readers from FILE* -------------------------------- */
@@ -42,24 +43,35 @@ int mo_demux_open(MoDemux *m, const char *path)
         fclose(m->f); m->f = NULL; return -2;
     }
 
-    long header_length = (long)rl32(m->f) + 8;
+    uint32_t declared_header = rl32(m->f);
+#if LONG_MAX < UINT32_MAX
+    if (declared_header > (uint32_t)(LONG_MAX - 8)) goto bad_header;
+#endif
+    long header_length = (long)declared_header + 8;
+    if (fseek(m->f, 0, SEEK_END) != 0) goto bad_header;
+    m->file_size = ftell(m->f);
+    if (m->file_size < header_length || fseek(m->f, 8, SEEK_SET) != 0) goto bad_header;
     int done = 0;
 
     while (!done) {
-        if (ftell(m->f) > header_length) break;
+        long section = ftell(m->f);
+        if (section < 0 || section + 4 > header_length) break;
 
         uint16_t marker = rl16(m->f);
         uint16_t flen   = rl16(m->f) * 4;
-        if (ftell(m->f) + flen > header_length) break;
+        long payload = ftell(m->f);
+        if (payload < 0 || flen > header_length - payload) break;
 
         switch (marker) {
         case FMT_LENGTH:
+            if (flen < 16) goto bad_header;
             m->fps_num = 256;
             m->fps_den = rl32(m->f);
             m->frame_count = rl32(m->f);
             rl32(m->f); /* unknown */
             break;
         case FMT_VIDEO:
+            if (flen < 8) goto bad_header;
             m->width  = rl32(m->f);
             m->height = rl32(m->f);
             break;
@@ -68,6 +80,7 @@ int mo_demux_open(MoDemux *m, const char *path)
         case FMT_PCM:
         case FMT_ADPCM:
         case FMT_ADPCM_STEREO:
+            if (flen < 8) goto bad_header;
             m->sample_rate = rl32(m->f);
             uint32_t ch_count = rl32(m->f); /* channel count */
             switch (marker) {
@@ -85,7 +98,7 @@ int mo_demux_open(MoDemux *m, const char *path)
             int ok = 1;
             for (int i = 0; i < 3; i++) {
                 uint32_t sz = rl32(m->f);
-                if (sz == 0 || sz > 65536) { ok = 0; break; }
+                if (sz == 0 || sz > 65536 || sz > (uint32_t)(sec_start + flen - ftell(m->f))) { ok = 0; break; }
                 m->vh[i] = malloc(sz);
                 if (!m->vh[i] || fread(m->vh[i], 1, sz, m->f) != sz) { ok = 0; break; }
                 m->vh_size[i] = sz;
@@ -104,7 +117,7 @@ int mo_demux_open(MoDemux *m, const char *path)
                 } else { m->channels = 2; m->sample_rate = 48000; }
             }
             /* skip to end of this format section regardless */
-            fseek(m->f, sec_start + flen, SEEK_SET);
+            if (fseek(m->f, sec_start + flen, SEEK_SET) != 0) goto bad_header;
             break;
         }
         case FMT_HEADER_DONE:
@@ -114,25 +127,26 @@ int mo_demux_open(MoDemux *m, const char *path)
         case FMT_UNKNOWN_AUDIO:
         case FMT_KEYINDEX:
         default:
-            fseek(m->f, flen, SEEK_CUR);
+            if (fseek(m->f, flen, SEEK_CUR) != 0) goto bad_header;
             break;
         }
     }
 
-    if (!done) { fclose(m->f); m->f = NULL; return -3; }
-    if ((m->width & 15) || (m->height & 15) || m->width <= 0 || m->height <= 0) {
-        fclose(m->f); m->f = NULL; return -4;
-    }
+    if (!done) goto bad_header;
+    if ((m->width & 15) || (m->height & 15) || m->width <= 0 || m->height <= 0 ||
+        m->fps_den <= 0 || m->frame_count < 0 ||
+        (m->audio_type != MO_AUDIO_NONE && (m->sample_rate <= 0 || m->channels <= 0)))
+        goto bad_header;
 
     m->data_start = ftell(m->f);
     m->cur_frame = 0;
     m->eof = 0;
     return 0;
-}
 
-/* growable read buffers, one for video one for audio */
-static uint8_t *g_vbuf; static int g_vcap;
-static uint8_t *g_abuf; static int g_acap;
+bad_header:
+    mo_demux_close(m);
+    return -3;
+}
 
 static uint8_t *ensure(uint8_t **buf, int *cap, int need)
 {
@@ -144,47 +158,40 @@ static uint8_t *ensure(uint8_t **buf, int *cap, int need)
     return *buf;
 }
 
-/*
- * mo_demux_read produces video then audio for each chunk. We read the whole
- * chunk on the video call and stash the audio for the following call.
- */
-static uint8_t *g_pending_audio;   /* points into g_abuf */
-static int      g_pending_audio_sz;
-static int      g_have_pending;
-
 void mo_demux_close(MoDemux *m)
 {
     if (m->f) fclose(m->f);
     m->f = NULL;
     for (int i = 0; i < 3; i++) { free(m->vh[i]); m->vh[i] = NULL; }
-    /* The pending-audio handshake is process-global scratch; clear it so a
-     * second demuxer instance (e.g. the Vorbis pre-decode pass) can't inherit
-     * a stale pending packet from this one. */
-    g_have_pending = 0;
+    free(m->vbuf); m->vbuf = NULL; m->vcap = 0;
+    free(m->abuf); m->abuf = NULL; m->acap = 0;
+    m->have_pending = 0;
 }
 
 int mo_demux_read(MoDemux *m, MoPacket *pkt)
 {
     if (!m->f || m->eof) return 0;
 
-    if (g_have_pending) {
+    if (m->have_pending) {
         pkt->is_audio = 1;
-        pkt->data = g_pending_audio;
-        pkt->size = g_pending_audio_sz;
+        pkt->data = m->abuf;
+        pkt->size = m->pending_audio_sz;
         pkt->frame_index = m->cur_frame - 1;
-        g_have_pending = 0;
+        m->have_pending = 0;
         return 1;
     }
 
     if (m->frame_count && m->cur_frame >= m->frame_count) { m->eof = 1; return 0; }
 
+    long chunk_start = ftell(m->f);
+    if (chunk_start < 0 || m->file_size - chunk_start < 8) { m->eof = 1; return 0; }
     uint32_t chunk_size = rl32(m->f);
     uint32_t video_size = rl32(m->f);
-    if (feof(m->f) || chunk_size < video_size + 8) { m->eof = 1; return 0; }
+    if (feof(m->f) || chunk_size < video_size + 8 || chunk_size > (uint32_t)(m->file_size - chunk_start) || video_size > INT_MAX) { m->eof = 1; return 0; }
     uint32_t audio_size = chunk_size - video_size - 8;
 
-    if (!ensure(&g_vbuf, &g_vcap, video_size ? video_size : 1)) return -1;
-    if (fread(g_vbuf, 1, video_size, m->f) != video_size) { m->eof = 1; return 0; }
+    if (!ensure(&m->vbuf, &m->vcap, video_size ? (int)video_size : 1)) return -1;
+    if (fread(m->vbuf, 1, video_size, m->f) != video_size) { m->eof = 1; return 0; }
 
     /* audio + alignment padding. NB: matches FFmpeg exactly --
      * padding = 4 - (pos % 4), which is always 1..4 (a full 4 when
@@ -197,7 +204,8 @@ int mo_demux_read(MoDemux *m, MoPacket *pkt)
      *           the last packet is byte-complete (Tremor self-delimits).
      *   Block codecs (ADPCM/PCM/FastAudio): round the read up into the pad
      *           to complete a partial final frame (per ffmpeg_encoder modec). */
-    int read_size = audio_size;
+    if (audio_size > INT_MAX) { m->eof = 1; return 0; }
+    int read_size = (int)audio_size;
     int block = 0;
     if (m->audio_type == MO_AUDIO_VORBIS) {
         read_size = audio_size; // Tremor fails if given trailing alignment padding
@@ -218,8 +226,8 @@ int mo_demux_read(MoDemux *m, MoPacket *pkt)
     }
 
     if (read_size > 0) {
-        if (!ensure(&g_abuf, &g_acap, read_size)) return -1;
-        int got = fread(g_abuf, 1, read_size, m->f);
+        if (!ensure(&m->abuf, &m->acap, read_size)) return -1;
+        int got = fread(m->abuf, 1, read_size, m->f);
         if (got != read_size) { m->eof = 1; read_size = got; }
     }
     /* skip any padding we didn't already consume into the audio read */
@@ -227,12 +235,11 @@ int mo_demux_read(MoDemux *m, MoPacket *pkt)
     if (consumed_pad < 0) consumed_pad = 0;
     if (padding - consumed_pad > 0) fseek(m->f, padding - consumed_pad, SEEK_CUR);
 
-    g_pending_audio = g_abuf;
-    g_pending_audio_sz = read_size;
-    g_have_pending = read_size > 0;
+    m->pending_audio_sz = read_size;
+    m->have_pending = read_size > 0;
 
     pkt->is_audio = 0;
-    pkt->data = g_vbuf;
+    pkt->data = m->vbuf;
     pkt->size = video_size;
     pkt->frame_index = m->cur_frame;
     m->cur_frame++;

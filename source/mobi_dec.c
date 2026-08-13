@@ -890,6 +890,7 @@ static int predict_motion(MobiDecoder *s, int width, int height, int index,
 
 int mobi_decode(MobiDecoder *s, const uint8_t *data, int size, MoFrame **out)
 {
+    if (!s || !data || !out || size <= 0 || size > INT_MAX - 10) return -1;
     BitReader *gb = &s->gb;
     MoFrame *frame = &s->pic[s->current_pic];
     int padded = ((size + 1) & ~1) + 8;

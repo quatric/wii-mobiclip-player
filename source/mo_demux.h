@@ -35,8 +35,17 @@ typedef struct MoDemux {
 
     /* per-packet streaming state */
     long   data_start;
+    long   file_size;
     int    cur_frame;
     int    eof;
+
+    /* Packet storage and the video/audio handoff are per demuxer.  Keeping
+     * these here makes it safe to inspect/predecode a second .mo file while
+     * another instance is open. */
+    uint8_t *vbuf, *abuf;
+    int      vcap, acap;
+    int      pending_audio_sz;
+    int      have_pending;
 } MoDemux;
 
 /* A demuxed packet (points into a reusable internal buffer). */

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -148,10 +149,22 @@ static void play_file(const char *path)
             else mo_audio_init(&aud, mux.audio_type, mux.channels);
             
             ach = is_vorbis ? mo_vorbis_channels(pv) : mux.channels;
+            if (ach <= 0 || ach > 2 || (is_vorbis && !pv)) {
+                if (pv) mo_vorbis_close(pv);
+                mo_demux_close(&pre);
+                has_audio = 0;
+                goto audio_ready;
+            }
             long cap = mux.frame_count > 0
                 ? ((long)mux.frame_count * mux.fps_num / mux.fps_den + 2) * (long)mux.sample_rate
                 : (long)mux.sample_rate * 600;
-            vpcm = calloc(cap * ach, sizeof(int16_t));
+            if (cap <= 0 || cap > INT_MAX / ach / (long)sizeof(int16_t)) {
+                if (is_vorbis) mo_vorbis_close(pv);
+                mo_demux_close(&pre);
+                has_audio = 0;
+                goto audio_ready;
+            }
+            vpcm = calloc((size_t)cap * ach, sizeof(int16_t));
             if (vpcm) {
                 MoPacket pk;
                 long running_pos = 0;
@@ -186,6 +199,7 @@ static void play_file(const char *path)
         }
         if (!vpcm) has_audio = 0;
     }
+audio_ready:
     if (has_audio) audio_out_start(mux.sample_rate);
 
     /* Frame rate is fps_den/fps_num (fps_num is fixed at 256), so the frame
@@ -420,7 +434,17 @@ int main(int argc, char **argv)
             if (n_entries > 0) {
                 Entry *e = &entries[sel];
                 if (e->is_dir) {
-                    if (path[strlen(path)-1] != '/') strcat(path, "/");
+                    size_t plen = strlen(path);
+                    size_t elen = strlen(e->name);
+                    int needs_slash = plen > 0 && path[plen - 1] != '/';
+                    if (plen + needs_slash + elen >= sizeof(path)) {
+                        con_clear(); con_goto(12, 25);
+                        con_printf("Path is too long.");
+                        VIDEO_WaitVSync();
+                        draw_browser(path, sel, top);
+                        continue;
+                    }
+                    if (needs_slash) strcat(path, "/");
                     strcat(path, e->name);
                     scan_dir(path);
                     sel = top = 0;

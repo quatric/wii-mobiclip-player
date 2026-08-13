@@ -86,7 +86,9 @@ static inline int br_get_ue(BitReader *b)
     int lz = 0;
     while (br_get1(b) == 0) {
         lz++;
-        if (lz > 31) return 0;
+        /* A 32-bit Exp-Golomb value cannot have a 31-bit suffix in this
+         * decoder.  Stop before an overflowing shift below. */
+        if (lz >= 31) return 0;
     }
     if (lz == 0) return 0;
     return ((1 << lz) - 1) + (int)br_get(b, lz);
