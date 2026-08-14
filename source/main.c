@@ -139,52 +139,56 @@ static void play_file(const char *path)
      * BGM). Cheap codecs (ADPCM/PCM/FastAudio) stay inline. */
     int16_t *vpcm = NULL; long vtotal = 0, vpos = 0;
 
+    MoAudio inline_aud;
+    int16_t *inline_buf = NULL;
+
     if (has_audio) {
-        MoDemux pre;
-        if (mo_demux_open(&pre, path) == 0) {
-            MoVorbis *pv = NULL;
-            MoAudio aud;
-            if (is_vorbis) pv = mo_vorbis_open(&pre);
-            else mo_audio_init(&aud, mux.audio_type, mux.channels);
-            
-            ach = is_vorbis ? mo_vorbis_channels(pv) : mux.channels;
-            long cap = mux.frame_count > 0
-                ? ((long)mux.frame_count * mux.fps_num / mux.fps_den + 2) * (long)mux.sample_rate
-                : (long)mux.sample_rate * 600;
-            vpcm = calloc(cap * ach, sizeof(int16_t));
-            if (vpcm) {
-                MoPacket pk;
-                long running_pos = 0;
-                int is_continuous = 0;
-                while (mo_demux_read(&pre, &pk) == 1) {
-                    if (pk.is_audio && pk.size > 0) {
-                        unsigned seq = pk.size >= 2 ? (pk.data[0] | (pk.data[1] << 8)) : 0;
-                        long pos = 0;
-                        if (!is_continuous) {
-                            running_pos = (long)((long long)pk.frame_index * pre.fps_num * pre.sample_rate / pre.fps_den);
-                            if (seq != 0xFFFF && is_vorbis && pk.size >= 4) {
-                                running_pos += (int16_t)(pk.data[2] | (pk.data[3] << 8));
+        if (is_vorbis) {
+            MoDemux pre;
+            if (mo_demux_open(&pre, path) == 0) {
+                MoVorbis *pv = mo_vorbis_open(&pre);
+                ach = mo_vorbis_channels(pv);
+                long cap = mux.frame_count > 0
+                    ? ((long)mux.frame_count * mux.fps_num / mux.fps_den + 2) * (long)mux.sample_rate
+                    : (long)mux.sample_rate * 600;
+                vpcm = calloc(cap * ach, sizeof(int16_t));
+                if (vpcm) {
+                    MoPacket pk;
+                    long running_pos = 0;
+                    int is_continuous = 0;
+                    while (mo_demux_read(&pre, &pk) == 1) {
+                        if (pk.is_audio && pk.size > 0) {
+                            unsigned seq = pk.size >= 2 ? (pk.data[0] | (pk.data[1] << 8)) : 0;
+                            long pos = 0;
+                            if (!is_continuous) {
+                                running_pos = (long)((long long)pk.frame_index * pre.fps_num * pre.sample_rate / pre.fps_den);
+                                if (seq != 0xFFFF && pk.size >= 4) {
+                                    running_pos += (int16_t)(pk.data[2] | (pk.data[3] << 8));
+                                }
+                                is_continuous = 1;
                             }
-                            is_continuous = 1;
+                            pos = running_pos;
+                            
+                            if (pos < 0) pos = 0;
+                            if (pos > cap - 8192) continue; /* drop if out of bounds */
+                            
+                            int decoded = mo_vorbis_decode(pv, pk.data, pk.size, vpcm + pos * ach, (int)(cap - pos));
+                            
+                            running_pos += decoded;
+                            if (pos + decoded > vtotal) vtotal = pos + decoded;
                         }
-                        pos = running_pos;
-                        
-                        if (pos < 0) pos = 0;
-                        if (pos > cap - 8192) continue; /* drop if out of bounds */
-                        
-                        int decoded = 0;
-                        if (is_vorbis) decoded = mo_vorbis_decode(pv, pk.data, pk.size, vpcm + pos * ach, (int)(cap - pos));
-                        else decoded = mo_audio_decode(&aud, pk.data, pk.size, vpcm + pos * ach, (int)(cap - pos));
-                        
-                        running_pos += decoded;
-                        if (pos + decoded > vtotal) vtotal = pos + decoded;
                     }
                 }
+                mo_vorbis_close(pv);
+                mo_demux_close(&pre);
             }
-            if (is_vorbis) mo_vorbis_close(pv);
-            mo_demux_close(&pre);
+            if (!vpcm) has_audio = 0;
+        } else {
+            /* Cheap codecs stay inline */
+            mo_audio_init(&inline_aud, mux.audio_type, mux.channels);
+            inline_buf = malloc(65536 * sizeof(int16_t));
+            if (!inline_buf) has_audio = 0;
         }
-        if (!vpcm) has_audio = 0;
     }
     if (has_audio) audio_out_start(mux.sample_rate);
 
@@ -253,6 +257,11 @@ static void play_file(const char *path)
                 vid_vsync();
                 current_retrace = vid_retraces() - start_retrace;
             }
+        } else if (has_audio && !is_vorbis && inline_buf && pkt.size > 0) {
+            int decoded = mo_audio_decode(&inline_aud, pkt.data, pkt.size, inline_buf, 65536 / ach);
+            if (decoded > 0) {
+                push_stereo(inline_buf, decoded, ach);
+            }
         }
 
         u32 b = input_down();
@@ -262,6 +271,7 @@ static void play_file(const char *path)
 
     if (has_audio) audio_out_stop();
     free(vpcm);
+    free(inline_buf);
     mobi_close(dec);
     mo_demux_close(&mux);
 }
