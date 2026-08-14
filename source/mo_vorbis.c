@@ -59,7 +59,7 @@ void mo_vorbis_close(MoVorbis *v)
     free(v);
 }
 
-int mo_vorbis_channels(MoVorbis *v) { return v ? v->vi.channels : 0; }
+int mo_vorbis_channels(MoVorbis *v) { return v->vi.channels; }
 
 static inline int clip15(int v)
 {
