@@ -35,11 +35,17 @@ int mo_demux_open(MoDemux *m, const char *path)
     memset(m, 0, sizeof(*m));
     m->f = fopen(path, "rb");
     if (!m->f) return -1;
+    
+    /* Allocate a large buffer for libfat to prevent I/O stalling */
+    m->file_buf = malloc(128 * 1024);
+    if (m->file_buf) setvbuf(m->f, m->file_buf, _IOFBF, 128 * 1024);
 
     uint8_t magic[4];
     if (fread(magic, 1, 4, m->f) != 4 ||
         magic[0] != 'M' || magic[1] != 'O' || magic[2] != 'C' || magic[3] != '5') {
-        fclose(m->f); m->f = NULL; return -2;
+        fclose(m->f); m->f = NULL; 
+        if (m->file_buf) { free(m->file_buf); m->file_buf = NULL; }
+        return -2;
     }
 
     long header_length = (long)rl32(m->f) + 8;
@@ -157,6 +163,7 @@ void mo_demux_close(MoDemux *m)
     if (m->f) fclose(m->f);
     m->f = NULL;
     for (int i = 0; i < 3; i++) { free(m->vh[i]); m->vh[i] = NULL; }
+    if (m->file_buf) { free(m->file_buf); m->file_buf = NULL; }
     /* The pending-audio handshake is process-global scratch; clear it so a
      * second demuxer instance (e.g. the Vorbis pre-decode pass) can't inherit
      * a stale pending packet from this one. */

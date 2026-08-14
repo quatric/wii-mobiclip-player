@@ -1,3 +1,4 @@
+#include <gccore.h>
 #include <asndlib.h>
 #include <ogc/cache.h>
 #include <string.h>
@@ -84,8 +85,11 @@ void audio_out_start(int sample_rate)
 void audio_out_push(const int16_t *stereo, int nsamples)
 {
     for (int i = 0; i < nsamples; i++) {
-        int nx = (wr + 1) % RING_FRAMES;
-        if (nx == rd) break;             /* full: drop */
+        int nx;
+        while ((nx = (wr + 1) % RING_FRAMES) == rd) {
+            /* full: block and wait for audio to drain */
+            VIDEO_WaitVSync();
+        }
         int l = stereo[i * 2], r = stereo[i * 2 + 1];
         if (faded < FADE_FRAMES) {       /* linear ramp on the first frames */
             l = l * faded / FADE_FRAMES;

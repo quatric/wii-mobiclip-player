@@ -37,6 +37,7 @@ typedef struct MoDemux {
     long   data_start;
     int    cur_frame;
     int    eof;
+    void  *file_buf;
 } MoDemux;
 
 /* A demuxed packet (points into a reusable internal buffer). */
