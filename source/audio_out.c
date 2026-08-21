@@ -1,4 +1,3 @@
-#include <gccore.h>
 #include <asndlib.h>
 #include <ogc/cache.h>
 #include <string.h>
@@ -6,7 +5,7 @@
 #include "audio_out.h"
 
 /* Stereo int16 ring buffer (single producer / single consumer). */
-#define RING_FRAMES (1 << 16)            /* stereo sample frames */
+#define RING_FRAMES (1 << 14)            /* stereo sample frames */
 static int16_t *ring;                    /* RING_FRAMES * 2 int16 */
 static volatile int rd, wr;              /* frame indices */
 static int srate;
@@ -82,14 +81,13 @@ void audio_out_start(int sample_rate)
     blk_cur = 0;
 }
 
-void audio_out_push(const int16_t *stereo, int nsamples)
+int audio_out_push(const int16_t *stereo, int nsamples)
 {
-    for (int i = 0; i < nsamples; i++) {
-        int nx;
-        while ((nx = (wr + 1) % RING_FRAMES) == rd) {
-            /* full: block and wait for audio to drain */
-            VIDEO_WaitVSync();
-        }
+    int pushed = 0;
+    while (pushed < nsamples) {
+        int nx = (wr + 1) % RING_FRAMES;
+        if (nx == rd) break;
+        int i = pushed;
         int l = stereo[i * 2], r = stereo[i * 2 + 1];
         if (faded < FADE_FRAMES) {       /* linear ramp on the first frames */
             l = l * faded / FADE_FRAMES;
@@ -99,7 +97,9 @@ void audio_out_push(const int16_t *stereo, int nsamples)
         ring[wr * 2]     = l;
         ring[wr * 2 + 1] = r;
         wr = nx;
+        pushed++;
     }
+    return pushed;
 }
 
 int audio_out_queued(void) { return ring_count(); }

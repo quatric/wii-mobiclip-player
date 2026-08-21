@@ -102,24 +102,39 @@ static void draw_browser(const char *path, int sel, int top)
 /* ------------------------------------------------------------------ */
 
 
-static int16_t aud_st[64 * 1024 * 2];
+#define AUDIO_PACKET_FRAMES (64 * 1024)
+#define AUDIO_PUSH_FRAMES   2048
 
-/* mix `ns` interleaved `ch`-channel int16 samples down to stereo and queue */
-static void push_stereo(const int16_t *in, int ns, int ch)
+static int16_t aud_st[AUDIO_PUSH_FRAMES * 2];
+
+/* Mix to stereo in small chunks and return the number of input frames queued. */
+static int push_stereo(const int16_t *in, int ns, int ch)
 {
-    if (ns <= 0) return;
-    if (ch == 2) {
-        audio_out_push(in, ns);
-    } else if (ch == 1) {
-        for (int i = 0; i < ns; i++) aud_st[i*2] = aud_st[i*2+1] = in[i];
-        audio_out_push(aud_st, ns);
-    } else {                       /* >2ch: take first two channels */
-        for (int i = 0; i < ns; i++) {
-            aud_st[i*2]   = in[i*ch];
-            aud_st[i*2+1] = in[i*ch + 1];
+    if (ns <= 0) return 0;
+    if (ch == 2) return audio_out_push(in, ns);
+
+    int total = 0;
+    while (total < ns) {
+        int n = ns - total;
+        int space = audio_out_space();
+        if (n > space) n = space;
+        if (n > AUDIO_PUSH_FRAMES) n = AUDIO_PUSH_FRAMES;
+        if (n <= 0) break;
+
+        if (ch == 1) {
+            for (int i = 0; i < n; i++)
+                aud_st[i*2] = aud_st[i*2+1] = in[total + i];
+        } else {
+            for (int i = 0; i < n; i++) {
+                aud_st[i*2]   = in[(total + i)*ch];
+                aud_st[i*2+1] = in[(total + i)*ch + 1];
+            }
         }
-        audio_out_push(aud_st, ns);
+        int pushed = audio_out_push(aud_st, n);
+        total += pushed;
+        if (pushed < n) break;
     }
+    return total;
 }
 
 static void play_file(const char *path)
@@ -134,61 +149,24 @@ static void play_file(const char *path)
     int has_audio = mux.audio_type != MO_AUDIO_NONE;
     int ach = mux.channels > 0 ? mux.channels : 2;
 
-    /* Vorbis decode (Tremor) is too heavy to run inline every video frame, so
-     * pre-decode the whole track once and stream it per-frame (like Flipnote
-     * BGM). Cheap codecs (ADPCM/PCM/FastAudio) stay inline. */
-    int16_t *vpcm = NULL; long vtotal = 0, vpos = 0;
-
-    MoAudio inline_aud;
-    int16_t *inline_buf = NULL;
+    /* Decode every codec incrementally into a bounded per-section buffer. */
+    MoAudio audio_dec;
+    MoVorbis *vorbis_dec = NULL;
+    int16_t *audio_buf = NULL;
+    int audio_pending = 0;
+    int audio_pos = 0;
 
     if (has_audio) {
         if (is_vorbis) {
-            MoDemux pre;
-            if (mo_demux_open(&pre, path) == 0) {
-                MoVorbis *pv = mo_vorbis_open(&pre);
-                ach = mo_vorbis_channels(pv);
-                long cap = mux.frame_count > 0
-                    ? ((long)mux.frame_count * mux.fps_num / mux.fps_den + 2) * (long)mux.sample_rate
-                    : (long)mux.sample_rate * 600;
-                vpcm = calloc(cap * ach, sizeof(int16_t));
-                if (vpcm) {
-                    MoPacket pk;
-                    long running_pos = 0;
-                    int is_continuous = 0;
-                    while (mo_demux_read(&pre, &pk) == 1) {
-                        if (pk.is_audio && pk.size > 0) {
-                            unsigned seq = pk.size >= 2 ? (pk.data[0] | (pk.data[1] << 8)) : 0;
-                            long pos = 0;
-                            if (!is_continuous) {
-                                running_pos = (long)((long long)pk.frame_index * pre.fps_num * pre.sample_rate / pre.fps_den);
-                                if (seq != 0xFFFF && pk.size >= 4) {
-                                    running_pos += (int16_t)(pk.data[2] | (pk.data[3] << 8));
-                                }
-                                is_continuous = 1;
-                            }
-                            pos = running_pos;
-                            
-                            if (pos < 0) pos = 0;
-                            if (pos > cap - 8192) continue; /* drop if out of bounds */
-                            
-                            int decoded = mo_vorbis_decode(pv, pk.data, pk.size, vpcm + pos * ach, (int)(cap - pos));
-                            
-                            running_pos += decoded;
-                            if (pos + decoded > vtotal) vtotal = pos + decoded;
-                        }
-                    }
-                }
-                mo_vorbis_close(pv);
-                mo_demux_close(&pre);
-            }
-            if (!vpcm) has_audio = 0;
+            vorbis_dec = mo_vorbis_open(&mux);
+            if (vorbis_dec) ach = mo_vorbis_channels(vorbis_dec);
+            else has_audio = 0;
         } else {
-            /* Cheap codecs stay inline */
-            mo_audio_init(&inline_aud, mux.audio_type, mux.channels);
-            inline_buf = malloc(65536 * sizeof(int16_t));
-            if (!inline_buf) has_audio = 0;
+            mo_audio_init(&audio_dec, mux.audio_type, ach);
         }
+        if (has_audio)
+            audio_buf = malloc((size_t)AUDIO_PACKET_FRAMES * ach * sizeof(int16_t));
+        if (!audio_buf) has_audio = 0;
     }
     if (has_audio) audio_out_start(mux.sample_rate);
 
@@ -209,6 +187,14 @@ static void play_file(const char *path)
     int stop = 0, paused = 0;
 
     while (!stop && mo_demux_read(&mux, &pkt) == 1) {
+        if (audio_pending > 0) {
+            int pushed = push_stereo(audio_buf + audio_pos * ach,
+                                     audio_pending, ach);
+            audio_pos += pushed;
+            audio_pending -= pushed;
+            if (audio_pending == 0) audio_pos = 0;
+        }
+
         /* pause loop: hold on the current frame, keep polling input */
         while (paused && !stop) {
             u32 pb = input_down();
@@ -230,26 +216,6 @@ static void play_file(const char *path)
                     vid_flip();
                 }
             }
-            /* Stream audio based on the hardware clock to prevent starvation. */
-            if (vpcm && vpos < vtotal) {
-                /* Target 0.25 seconds ahead of current retrace to keep the ring buffer full */
-                long long current_retrace = vid_retraces() - start_retrace;
-                long ideal_pos = (long)(current_retrace * mux.sample_rate / hz);
-                long target_pos = ideal_pos + mux.sample_rate / 4;
-                if (target_pos > vtotal) target_pos = vtotal;
-                
-                long n = target_pos - vpos;
-                if (n > 0) {
-                    /* Only push what fits in the ring buffer without dropping */
-                    int space = audio_out_space();
-                    if (n > space) n = space;
-                    
-                    if (n > 0) {
-                        push_stereo(vpcm + vpos * ach, (int)n, ach);
-                        vpos += n;
-                    }
-                }
-            }
             /* Hold this frame until its scheduled retrace. Absolute schedule
              * self-corrects: a slow frame simply waits less (or not at all). */
             long long current_retrace = vid_retraces() - start_retrace;
@@ -257,10 +223,31 @@ static void play_file(const char *path)
                 vid_vsync();
                 current_retrace = vid_retraces() - start_retrace;
             }
-        } else if (has_audio && !is_vorbis && inline_buf && pkt.size > 0) {
-            int decoded = mo_audio_decode(&inline_aud, pkt.data, pkt.size, inline_buf, 65536 / ach);
-            if (decoded > 0) {
-                push_stereo(inline_buf, decoded, ach);
+        } else if (has_audio && pkt.size > 0) {
+            /*
+             * Append this section behind any PCM the output ring has not yet
+             * accepted. Compacting only moves bounded decoded PCM; compressed
+             * input is still consumed directly from the demuxer.
+             */
+            if (audio_pos > 0 && audio_pending > 0) {
+                memmove(audio_buf, audio_buf + audio_pos * ach,
+                        (size_t)audio_pending * ach * sizeof(int16_t));
+                audio_pos = 0;
+            }
+            int available = AUDIO_PACKET_FRAMES - audio_pending;
+            if (available > 0) {
+                int decoded = is_vorbis
+                    ? mo_vorbis_decode(vorbis_dec, pkt.data, pkt.size,
+                                       audio_buf + audio_pending * ach, available)
+                    : mo_audio_decode(&audio_dec, pkt.data, pkt.size,
+                                      audio_buf + audio_pending * ach, available);
+                if (decoded > 0) audio_pending += decoded;
+            }
+            if (audio_pending > 0) {
+                int pushed = push_stereo(audio_buf, audio_pending, ach);
+                audio_pos = pushed;
+                audio_pending -= pushed;
+                if (audio_pending == 0) audio_pos = 0;
             }
         }
 
@@ -270,8 +257,8 @@ static void play_file(const char *path)
     }
 
     if (has_audio) audio_out_stop();
-    free(vpcm);
-    free(inline_buf);
+    mo_vorbis_close(vorbis_dec);
+    free(audio_buf);
     mobi_close(dec);
     mo_demux_close(&mux);
 }
