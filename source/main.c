@@ -381,6 +381,7 @@ int main(int argc, char **argv)
             if (input_down() & WPAD_BUTTON_HOME) break;
             VIDEO_WaitVSync();
         }
+        input_shutdown();
         return 0;
     }
 
@@ -450,5 +451,6 @@ int main(int argc, char **argv)
         VIDEO_WaitVSync();
     }
 
+    input_shutdown();
     return 0;
 }

@@ -23,6 +23,25 @@ LDFLAGS		=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
 LIBS		:=	-lfat -lwiiuse -lbte -lasnd -lvorbisidec -logg -logc -lm
 
+# Optional controller backends. Install each library in portlibs/ppc.
+WITH_WIIDRC	?=	0
+WITH_WUPC	?=	0
+WITH_SICKSAXIS	?=	0
+
+ifeq ($(WITH_WIIDRC),1)
+	CFLAGS		+=	-DHAVE_WIIDRC
+	LIBS		:=	-lwiidrc $(LIBS)
+endif
+ifeq ($(WITH_WUPC),1)
+	CFLAGS		+=	-DHAVE_WUPC
+	LDFLAGS		+=	-Wl,-wrap,wiiuse_accept
+	LIBS		:=	-lwupc $(LIBS)
+endif
+ifeq ($(WITH_SICKSAXIS),1)
+	CFLAGS		+=	-DHAVE_SICKSAXIS
+	LIBS		:=	-lsicksaxis $(LIBS)
+endif
+
 LIBDIRS		:=	$(CURDIR)/portlibs/ppc
 
 #---------------------------------------------------------------------------------

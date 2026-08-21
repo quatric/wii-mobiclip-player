@@ -47,6 +47,30 @@ Produces `wii-mobiclip-player.dol`. Copy it (with `meta.xml`) to
 `sd:/apps/wii-mobiclip-player/boot.dol` for the Homebrew Channel, or send it with
 `make run` (wiiload).
 
+### Optional controllers
+
+The normal build supports Wii Remotes, Classic Controllers and GameCube pads.
+Build the pinned libraries into portlibs/ppc, then enable them independently:
+
+    ./scripts/build_controller_portlibs.sh
+
+- [FIX94/libwiidrc](https://github.com/FIX94/libwiidrc)
+- [FIX94/libwupc](https://github.com/FIX94/libwupc)
+- [xerpi/libsicksaxis](https://github.com/xerpi/libsicksaxis)
+
+    make WITH_WIIDRC=1       # Wii U GamePad via FIX94/libwiidrc
+    make WITH_WUPC=1         # Wii U Pro Controller via FIX94/libwupc
+    make WITH_SICKSAXIS=1    # DualShock 3 / Sixaxis via xerpi/libsicksaxis
+
+Any combination is allowed. The Wii U GamePad backend only works in Wii U
+Virtual Console mode with a properly patched fw.img; ordinary Wii and vWii
+execution cannot expose the GamePad. DualShock 3 support uses a wired USB
+connection under IOS58 and attempts to open the controller automatically. The Wii U Pro
+Controller backend requires the project's current-libogc compatibility wrapper.
+
+Note that libwupc is GPLv3. Distributing a binary linked against it requires
+complying with that license even though this project's own source is MIT.
+
 ## Controls
 
 Browser:
