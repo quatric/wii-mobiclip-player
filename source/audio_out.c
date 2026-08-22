@@ -5,7 +5,9 @@
 #include "audio_out.h"
 
 /* Stereo int16 ring buffer (single producer / single consumer). */
-#define RING_FRAMES (1 << 14)            /* stereo sample frames */
+/* Keep enough bounded headroom to absorb SD/libfat latency spikes. At 48 kHz
+ * this is about 1.36 seconds (256 KiB), not whole-file buffering. */
+#define RING_FRAMES (1 << 16)            /* stereo sample frames */
 static int16_t *ring;                    /* RING_FRAMES * 2 int16 */
 static volatile int rd, wr;              /* frame indices */
 static int srate;
