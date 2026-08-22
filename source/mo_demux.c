@@ -36,12 +36,9 @@ int mo_demux_open(MoDemux *m, const char *path)
     m->f = fopen(path, "rb");
     if (!m->f) return -1;
     
-    /* PCM raises the sustained read rate enough that short SD/libfat stalls
-     * become visible as both video skips and audio underruns. Keep a bounded
-     * 512 KiB stdio read-ahead cache; this is independent of file length. */
-    const size_t file_buf_size = 512 * 1024;
-    m->file_buf = malloc(file_buf_size);
-    if (m->file_buf) setvbuf(m->f, m->file_buf, _IOFBF, file_buf_size);
+    /* Allocate a large buffer for libfat to prevent I/O stalling */
+    m->file_buf = malloc(128 * 1024);
+    if (m->file_buf) setvbuf(m->f, m->file_buf, _IOFBF, 128 * 1024);
 
     uint8_t magic[4];
     if (fread(magic, 1, 4, m->f) != 4 ||
