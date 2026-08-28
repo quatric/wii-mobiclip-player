@@ -406,12 +406,25 @@ static void play_rgb(RgbSource *src)
         }
         if (stop) break;
 
+        /* THP frames are independent JPEGs.  On Wii, a full-resolution JPEG
+         * can take longer than one video period to decode.  Jump over frames
+         * whose presentation time has already passed instead of decoding and
+         * dropping every late frame forever.  PPM/KWZ remain strictly
+         * sequential because their frames depend on earlier layer state. */
+        if (src->independent_frames) {
+            long long elapsed = vid_retraces() - start_retrace;
+            long desired = (long)(elapsed * 1000000LL /
+                                  ((long long)period_us * hz));
+            if (desired > frame) frame = (int)desired;
+            if (frame >= src->frame_count) break;
+        }
+
         long long ideal_retrace = (long long)frame * period_us * hz / 1000000;
         long target = start_retrace + ideal_retrace;
 
         if (src->get_frame(src, frame, rgb) == 0) {
             int drop = (int)(vid_retraces() - target) > vspf;
-            if (!drop) {
+            if (!drop || src->independent_frames) {
                 vid_draw_rgb24(rgb, src->w, src->h);
                 vid_flip();
             }

@@ -15,6 +15,7 @@ typedef struct RgbSource {
     int    frame_count;
     double fps;               /* frames per second (may be fractional) */
     int    loops;             /* 1 => restart at the end (PPM/KWZ Flipnotes) */
+    int    independent_frames;/* decoder may jump directly to any frame */
 
     int16_t *audio;           /* interleaved master PCM, NULL if silent */
     long     audio_samples;   /* per-channel sample count */

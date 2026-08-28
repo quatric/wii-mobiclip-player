@@ -289,6 +289,7 @@ int thp_open(RgbSource *out, const char *path)
     out->w = c->width; out->h = c->height;
     out->frame_count = c->framecnt;
     out->fps = fps;
+    out->independent_frames = 1;
     out->channels = 1;
     out->get_frame = thp_get_frame;
     out->close = thp_close;
