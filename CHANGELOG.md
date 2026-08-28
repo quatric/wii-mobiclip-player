@@ -10,7 +10,6 @@
 - Fixed Mobiclip reference-frame selection for files produced by current Mobipeg builds.
 - Fixed THP playback falling permanently behind when full-resolution JPEG decoding misses a presentation deadline.
 - Fixed audio initialization and replay behavior across supported codecs.
-- Added automated all-controller builds and Homebrew Channel packaging.
 
 ## v1.0 — 2026-06-28
 
