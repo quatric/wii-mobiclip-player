@@ -137,6 +137,105 @@ static int push_stereo(const int16_t *in, int ns, int ch)
     return total;
 }
 
+#define PCM_PIPELINE_FRAMES 5
+
+/* Read/decode one complete video+PCM chunk. The decoder owns six rotating
+ * frame slots, so keeping five decoded frames queued never requires another
+ * image allocation and the next decode only reuses an already displayed slot. */
+static int read_pcm_frame(MoDemux *mux, MobiDecoder *dec, MoAudio *audio_dec,
+                          int16_t *audio_buf, int audio_cap, int ch,
+                          MoFrame **out)
+{
+    MoPacket pkt;
+    MoFrame *frame = NULL;
+    int got_video = 0;
+    while (mo_demux_read(mux, &pkt) == 1) {
+        if (!pkt.is_audio) {
+            if (mobi_decode(dec, pkt.data, pkt.size, &frame) == 0 && frame)
+                got_video = 1;
+        } else {
+            if (pkt.size > 0) {
+                int decoded = mo_audio_decode(audio_dec, pkt.data, pkt.size,
+                                              audio_buf, audio_cap);
+                if (decoded > 0) push_stereo(audio_buf, decoded, ch);
+            }
+            if (got_video) {
+                *out = frame;
+                return 1;
+            }
+        }
+    }
+    if (got_video) {
+        *out = frame;
+        return 1;
+    }
+    return 0;
+}
+
+static int play_pcm(MoDemux *mux, MobiDecoder *dec, MoAudio *audio_dec,
+                     int16_t *audio_buf, int audio_cap, int ch,
+                     int period_us, int hz, int vspf)
+{
+    MoFrame *frames[PCM_PIPELINE_FRAMES];
+    int queued = 0;
+    if (!audio_out_prepare(mux->sample_rate)) return 0;
+
+    while (queued < PCM_PIPELINE_FRAMES &&
+           read_pcm_frame(mux, dec, audio_dec, audio_buf, audio_cap, ch,
+                          &frames[queued]))
+        queued++;
+    if (queued == 0) return 0;
+
+    audio_out_begin();
+    vid_clear_both();
+    long long start_retrace = vid_retraces();
+    long display_index = 0;
+    int head = 0, stop = 0, paused = 0;
+
+    while (queued > 0 && !stop) {
+        while (paused && !stop) {
+            u32 pb = input_down();
+            long long ideal = (display_index + 1) * (long long)period_us * hz / 1000000;
+            if (pb & (WPAD_BUTTON_A | WPAD_BUTTON_PLUS)) {
+                paused = 0;
+                start_retrace = vid_retraces() - ideal;
+            }
+            if (pb & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) stop = 1;
+            VIDEO_WaitVSync();
+        }
+        if (stop) break;
+
+        long long ideal = (display_index + 1) * (long long)period_us * hz / 1000000;
+        long target = start_retrace + ideal;
+        int drop = (int)(vid_retraces() - target) > vspf;
+        if (!drop) {
+            vid_draw_frame(frames[head]);
+            vid_flip();
+        }
+
+        /* Refill the slot only after its pixels have been copied to the XFB. */
+        MoFrame *next = NULL;
+        if (read_pcm_frame(mux, dec, audio_dec, audio_buf, audio_cap, ch, &next))
+            frames[head] = next;
+        else
+            queued--;
+        head = (head + 1) % PCM_PIPELINE_FRAMES;
+        display_index++;
+
+        long long current = vid_retraces() - start_retrace;
+        while (current < ideal) {
+            vid_vsync();
+            current = vid_retraces() - start_retrace;
+        }
+
+        u32 b = input_down();
+        if (b & (WPAD_BUTTON_B | WPAD_BUTTON_HOME)) stop = 1;
+        if (b & (WPAD_BUTTON_A | WPAD_BUTTON_PLUS)) paused = 1;
+    }
+    audio_out_stop();
+    return 1;
+}
+
 static void play_file(const char *path)
 {
     MoDemux mux;
@@ -168,7 +267,8 @@ static void play_file(const char *path)
             audio_buf = malloc((size_t)AUDIO_PACKET_FRAMES * ach * sizeof(int16_t));
         if (!audio_buf) has_audio = 0;
     }
-    if (has_audio) audio_out_start(mux.sample_rate);
+    if (has_audio && mux.audio_type != MO_AUDIO_PCM)
+        audio_out_start(mux.sample_rate);
 
     /* Frame rate is fps_den/fps_num (fps_num is fixed at 256), so the frame
      * period in seconds is fps_num/fps_den. e.g. fps_den=7680 -> 30 fps. */
@@ -179,7 +279,16 @@ static void play_file(const char *path)
     int vspf = (int)(((long long)period_us * hz + 500000) / 1000000);
     if (vspf < 1) vspf = 1;
 
-
+    if (has_audio && mux.audio_type == MO_AUDIO_PCM) {
+        if (play_pcm(&mux, dec, &audio_dec, audio_buf, AUDIO_PACKET_FRAMES,
+                     ach, period_us, hz, vspf)) {
+            free(audio_buf);
+            mobi_close(dec);
+            mo_demux_close(&mux);
+            return;
+        }
+        has_audio = 0;
+    }
 
     vid_clear_both();                 /* letterbox bars are static; clear once */
     long long start_retrace = vid_retraces();

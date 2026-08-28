@@ -19,6 +19,7 @@ static int blk_cur;
  * (e.g. FastAudio's IIR filter ramping from a zero state). */
 #define FADE_FRAMES 1024
 static int faded;
+static int prepared;
 
 static int ring_count(void)
 {
@@ -51,15 +52,23 @@ static void voice_cb(s32 voice)
     blk_cur ^= 1;
 }
 
-void audio_out_start(int sample_rate)
+int audio_out_prepare(int sample_rate)
 {
     srate = sample_rate > 0 ? sample_rate : 32000;
     if (!ring) ring = memalign(32, RING_FRAMES * 2 * sizeof(int16_t));
     if (!blk[0]) { blk[0] = memalign(32, BLK * 2 * sizeof(int16_t));
                    blk[1] = memalign(32, BLK * 2 * sizeof(int16_t)); }
+    if (!ring || !blk[0] || !blk[1]) return 0;
     rd = wr = 0;
     blk_cur = 0;
     faded = 0;
+    prepared = 1;
+    return 1;
+}
+
+void audio_out_begin(void)
+{
+    if (!prepared) return;
 
     /* ASND_Init() resets the DSP/IRQ state and is only meant to be called
      * once per process; calling it again on every replay silently breaks
@@ -68,17 +77,20 @@ void audio_out_start(int sample_rate)
     if (!asnd_inited) { ASND_Init(); asnd_inited = 1; }
     ASND_Pause(0);
 
-    /* prime both blocks with silence, start the voice */
-    memset(blk[0], 0, BLK * 2 * sizeof(int16_t));
-    DCFlushRange(blk[0], BLK * 2 * sizeof(int16_t));
+    /* Consume queued pre-roll into both DMA blocks. An empty ring still
+     * yields silence, preserving audio_out_start() for the other players. */
+    fill_block(blk[0]);
     ASND_SetVoice(0, VOICE_STEREO_16BIT, srate, 0,
                   blk[0], BLK * 2 * sizeof(int16_t), 255, 255, voice_cb);
-                  
-    memset(blk[1], 0, BLK * 2 * sizeof(int16_t));
-    DCFlushRange(blk[1], BLK * 2 * sizeof(int16_t));
+
+    fill_block(blk[1]);
     ASND_AddVoice(0, blk[1], BLK * 2 * sizeof(int16_t));
-    
     blk_cur = 0;
+}
+
+void audio_out_start(int sample_rate)
+{
+    if (audio_out_prepare(sample_rate)) audio_out_begin();
 }
 
 int audio_out_push(const int16_t *stereo, int nsamples)
