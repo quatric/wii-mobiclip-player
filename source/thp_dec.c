@@ -5,10 +5,10 @@
  * ported from the AV_CODEC_ID_ADPCM_THP path in libavcodec/adpcm.c; video is
  * baseline MJPEG decoded by the bundled NanoJPEG in THP "unescaped scan" mode.
  *
- * The whole file is read into memory and frame byte ranges are indexed up
- * front. Audio (all packets, running ADPCM state) is pre-decoded/mixed into one
- * interleaved int16 master; video frames are independent JPEGs decoded on
- * demand to RGB24.
+ * The header/index and audio are parsed in one temporary whole-file pass.
+ * Afterwards the file image is released and independent JPEG frames are read
+ * from storage on demand, keeping runtime memory bounded by one compressed
+ * frame instead of the duration/bitrate of the movie.
  */
 #include <math.h>
 #include <stdint.h>
@@ -29,6 +29,10 @@ static inline int16_t clip16(int v){ return v < -32768 ? -32768 : (v > 32767 ? 3
 typedef struct ThpCtx {
     uint8_t *buf;
     long     size;
+    FILE    *f;
+    uint8_t *file_buf;
+    uint8_t *frame_buf;
+    uint32_t frame_cap;
 
     int      framecnt;
     int      width, height;
@@ -37,7 +41,6 @@ typedef struct ThpCtx {
     uint32_t *vid_sz;
 
     int16_t *audio;        /* interleaved master (owned here) */
-    uint8_t *rgb;          /* scratch RGB24 for the current frame */
 } ThpCtx;
 
 /* ---- audio (ADPCM_THP) ---- */
@@ -159,16 +162,25 @@ static void thp_build_audio(ThpCtx *c, RgbSource *out,
 static int thp_get_frame(RgbSource *s, int idx, uint8_t *dst)
 {
     ThpCtx *c = s->priv;
-    const uint8_t *jpg;
+    uint32_t size;
     int n = c->width * c->height;
 
-    if (idx < 0 || idx >= c->framecnt) return -1;
-    jpg = c->buf + c->vid_off[idx];
+    if (idx < 0 || idx >= c->framecnt || !c->f) return -1;
+    size = c->vid_sz[idx];
+    if (size > c->frame_cap) {
+        uint8_t *next = realloc(c->frame_buf, size);
+        if (!next) return -1;
+        c->frame_buf = next;
+        c->frame_cap = size;
+    }
+    if (fseek(c->f, c->vid_off[idx], SEEK_SET) != 0 ||
+        fread(c->frame_buf, 1, size, c->f) != size)
+        return -1;
 
     njDone();   /* free the previous frame's buffers, then re-init (njDone ends
                  * with njInit); njInit alone would leak them every frame -> OOM */
     njSetUnescaped(1);
-    if (njDecode(jpg, (int)c->vid_sz[idx]) != NJ_OK) return -1;
+    if (njDecode(c->frame_buf, (int)size) != NJ_OK) return -1;
     if (njGetWidth() != c->width || njGetHeight() != c->height) return -1;
 
     if (njIsColor()) {
@@ -185,7 +197,9 @@ static void thp_close(RgbSource *s)
     ThpCtx *c = s->priv;
     if (!c) return;
     njDone();
-    free(c->buf); free(c->vid_off); free(c->vid_sz); free(c->rgb);
+    if (c->f) fclose(c->f);
+    free(c->file_buf); free(c->frame_buf);
+    free(c->buf); free(c->vid_off); free(c->vid_sz);
     free(c->audio);
     free(c);
     s->priv = NULL;
@@ -259,8 +273,7 @@ int thp_open(RgbSource *out, const char *path)
         audio_off = malloc((size_t)framecnt * sizeof(long));
         audio_sz  = malloc((size_t)framecnt * sizeof(uint32_t));
     }
-    c->rgb = malloc((size_t)c->width * c->height * 3);
-    if (!c->vid_off || !c->vid_sz || !c->rgb ||
+    if (!c->vid_off || !c->vid_sz ||
         (has_audio && (!audio_off || !audio_sz))) goto fail;
 
     /* walk frame chain */
@@ -298,12 +311,24 @@ int thp_open(RgbSource *out, const char *path)
     if (has_audio)
         thp_build_audio(c, out, audio_off, audio_sz, ach, arate);
 
+    /* Audio is now independent of the container image.  Reopen the THP for
+     * bounded random frame reads, then release the duration-sized buffer. */
+    c->f = fopen(path, "rb");
+    if (!c->f) goto fail;
+    c->file_buf = malloc(128 * 1024);
+    if (c->file_buf) setvbuf(c->f, (char *)c->file_buf, _IOFBF, 128 * 1024);
+    free(c->buf);
+    c->buf = NULL;
+
     free(audio_off); free(audio_sz);
     return 0;
 
 fail:
     free(audio_off); free(audio_sz);
-    free(c->buf); free(c->vid_off); free(c->vid_sz); free(c->rgb);
+    if (c->f) fclose(c->f);
+    free(c->file_buf); free(c->frame_buf);
+    free(c->buf); free(c->vid_off); free(c->vid_sz);
+    free(c->audio);
     free(c);
     return -1;
 }
