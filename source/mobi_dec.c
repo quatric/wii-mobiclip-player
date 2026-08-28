@@ -269,6 +269,7 @@ struct MobiDecoder {
     int width, height;
     MoFrame pic[6];
     void   *pic_alloc[6][3];   /* free() pointers */
+    uint8_t pic_valid[6];      /* slot contains a successfully decoded frame */
 
     int current_pic;
     int moflex;
@@ -802,6 +803,24 @@ static int predict_motion(MobiDecoder *s, int width, int height, int index,
         MotionXY mv = s->motion[0];
         if (sidx < 0) sidx += 6;
 
+        /* FFmpeg can distinguish allocated AVFrames from decoded reference
+         * frames.  This standalone port preallocates all six ring slots, so
+         * keep that state explicitly and mirror Mobipeg's nearest-reference
+         * fallback for streams produced by the current encoder. */
+        if (!s->pic_valid[sidx]) {
+            int replacement = -1;
+            for (int d = 1; d <= 5; d++) {
+                int cand = s->current_pic - d;
+                if (cand < 0) cand += 6;
+                if (s->pic_valid[cand]) {
+                    replacement = cand;
+                    break;
+                }
+            }
+            if (replacement < 0) return -1;
+            sidx = replacement;
+        }
+
         if (index > 0) {
             mv.x = mv.x + (unsigned)br_get_se(gb);
             mv.y = mv.y + (unsigned)br_get_se(gb);
@@ -958,6 +977,7 @@ int mobi_decode(MobiDecoder *s, const uint8_t *data, int size, MoFrame **out)
     }
 
     frame->moflex = s->moflex;
+    s->pic_valid[s->current_pic] = 1;
     s->current_pic = (s->current_pic + 1) % 6;
     *out = frame;
     return 0;
