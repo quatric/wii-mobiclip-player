@@ -21,7 +21,7 @@ CFLAGS		=	-g -O3 -Wall $(MACHDEP) $(INCLUDE)
 CXXFLAGS	=	$(CFLAGS)
 LDFLAGS		=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS		:=	-lfat -lwiiuse -lbte -lasnd -lvorbisidec -logg -logc -lm
+LIBS		:=	-lfat -lwiikeyboard -lwiiuse -lbte -lasnd -lvorbisidec -logg -logc -lm
 
 # Optional controller backends. Install each library in portlibs/ppc.
 WITH_WIIDRC	?=	0
