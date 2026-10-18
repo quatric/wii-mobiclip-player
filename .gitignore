@@ -5,3 +5,4 @@
 build/
 portlibs/
 .DS_Store
+.dolxz/
