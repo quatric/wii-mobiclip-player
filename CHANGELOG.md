@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2 — 2026-10-18
+
+- Checks GitHub for a newer release once at boot and says whether one is out (B skips the check). A installs it over this copy and returns to the loader; failures are quiet.
+- Releases include a Homebrew Channel zip, which the updater installs from.
+- Added USB keyboard support; all controller and keyboard input goes through libinput-wii, updated to the latest version.
+- `boot.dol` is a compressed self-extracting .dol and no longer hangs on boot in Dolphin.
+
 ## v1.1 — 2026-08-28
 
 - Added THP video playback with DSP/THP ADPCM audio.
