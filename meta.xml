@@ -2,7 +2,7 @@
 <app version="1">
   <name>Wii Mobiclip Player</name>
   <coder>quatric</coder>
-  <version>1.1</version>
+  <version>1.2</version>
   <release_date>20260828000000</release_date>
   <short_description>Play Mobiclip, THP, and Flipnote videos</short_description>
   <long_description>A Wii homebrew app that
