@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <wiiupdate.h>
 
 #include "video.h"
 #include "audio_out.h"
@@ -503,6 +504,15 @@ int main(int argc, char **argv)
             if (input_down() & WPAD_BUTTON_HOME) break;
             VIDEO_WaitVSync();
         }
+        input_shutdown();
+        return 0;
+    }
+
+    /* One update check at boot: B skips it, failures are silent. */
+    con_clear(); con_goto(2, 2);
+    con_printf("Wii Mobiclip Player %s\n\n  ", APP_VERSION);
+    WIIUPDATE_SetAppPath(argc > 0 ? argv[0] : NULL);
+    if (WIIUPDATE_CheckConsole("quatric", "wii-mobiclip-player", APP_VERSION, input_down) == WIIUPDATE_UPDATED) {
         input_shutdown();
         return 0;
     }
