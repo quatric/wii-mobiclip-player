@@ -43,9 +43,12 @@ make
 The Makefile links Tremor from `portlibs/ppc` (`LIBDIRS`), so the pacman and
 script approaches are interchangeable.
 
-Produces `wii-mobiclip-player.dol`. Copy it (with `meta.xml`) to
+Produces `wii-mobiclip-player.dol` and the much smaller self-extracting
+`wii-mobiclip-player-xz.dol`. Copy the latter (with `meta.xml`) to
 `sd:/apps/wii-mobiclip-player/boot.dol` for the Homebrew Channel, or send it with
 `make run` (wiiload).
+
+The first build downloads and builds [dolxz](https://github.com/FIX94/dolxz), which needs a host C compiler and liblzma (Debian/Ubuntu: `apt-get install liblzma-dev pkg-config`; macOS: `brew install xz`). `make NO_DOLXZ=1` skips the compressed `.dol`.
 
 ### Optional controllers
 
