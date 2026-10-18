@@ -1,5 +1,7 @@
 # Wii Mobiclip Player
 
+**Version:** 1.2 · **Coder:** quatric
+
 A Wii homebrew app that plays Wii Mobiclip files directly on hardware. No transcoding is used, every video is decoded on the Wii. It supports ADPCM, FastAudio, PCM, and Vorbis audio.
 
 It also plays **KWZ** (Flipnote Studio 3D) and **PPM** (Flipnote Studio DS)
