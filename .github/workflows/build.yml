@@ -40,14 +40,62 @@ jobs:
       with:
         name: wii-mobiclip-player
         path: artifact_root/
-
-    - name: Zip release
-      if: startsWith(github.ref, 'refs/tags/v')
+    - name: Zip the release
       run: |
         apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
         (cd artifact_root && zip -r "$GITHUB_WORKSPACE/wii-mobiclip-player.zip" apps)
-
-    - uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/v')
+    - uses: actions/upload-artifact@v4
       with:
-        files: wii-mobiclip-player.zip
+        name: release-wii-mobiclip-player
+        if-no-files-found: error
+        path: |
+          wii-mobiclip-player.zip
+
+  # Every push to the default branch refreshes the "latest" release; tags like v1.2.0 also get their own release.
+  release:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-wii-mobiclip-player
+          path: out
+      - name: Move the latest tag
+        if: startsWith(github.ref, 'refs/heads/')
+        run: |
+          git tag -f latest
+          git push -f origin latest
+      - name: Publish latest release
+        if: startsWith(github.ref, 'refs/heads/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Wii Mobiclip Player (latest)
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          body: |
+            Latest build of Wii Mobiclip Player from ${{ github.sha }}.
+
+            Extract wii-mobiclip-player.zip to the root of your SD card (or USB drive) and open Wii Mobiclip Player from the Homebrew Channel.
+          files: |
+            out/wii-mobiclip-player.zip
+      - name: Publish tagged release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Wii Mobiclip Player ${{ github.ref_name }}
+          make_latest: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Extract wii-mobiclip-player.zip to the root of your SD card (or USB drive) and open Wii Mobiclip Player from the Homebrew Channel.
+          files: |
+            out/wii-mobiclip-player.zip

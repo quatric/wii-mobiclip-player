@@ -7,6 +7,13 @@ A Wii homebrew app that plays Wii Mobiclip files directly on hardware. No transc
 It also plays **KWZ** (Flipnote Studio 3D) and **PPM** (Flipnote Studio DS)
 animations and **THP** (GameCube/Wii) video, each decoded on-device with audio.
 
+## Download
+
+Grab the latest build from the [latest release](../../releases/latest): `wii-mobiclip-player.zip`. Every push to the main branch refreshes it, and tagged versions get their own entry on the [releases page](../../releases).
+
+1. Extract `wii-mobiclip-player.zip` to the root of your SD card (or USB drive).
+2. Open Wii Mobiclip Player from the Homebrew Channel.
+
 ## What's inside
 
 | Component | File | Notes |
