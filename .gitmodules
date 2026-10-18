@@ -1,0 +1,3 @@
+[submodule "libinput-wii"]
+	path = libinput-wii
+	url = https://github.com/quatric/libinput-wii.git

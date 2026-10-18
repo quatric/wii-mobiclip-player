@@ -12,7 +12,7 @@ include $(DEVKITPPC)/wii_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	wii-mobiclip-player
 BUILD		:=	build
-SOURCES		:=	source
+SOURCES		:=	source libinput-wii/source
 DATA		:=	data
 INCLUDES	:=	source
 
@@ -42,7 +42,7 @@ ifeq ($(WITH_SICKSAXIS),1)
 	LIBS		:=	-lsicksaxis $(LIBS)
 endif
 
-LIBDIRS		:=	$(CURDIR)/portlibs/ppc
+LIBDIRS		:=	$(CURDIR)/portlibs/ppc $(CURDIR)/libinput-wii
 
 #---------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
