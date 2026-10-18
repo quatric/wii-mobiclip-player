@@ -3,8 +3,12 @@ name: Build Wii Mobiclip Player
 on:
   push:
     branches: [ master, main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ master, main ]
+
+permissions:
+  contents: write  # the release on a v* tag
 
 jobs:
   build:
@@ -36,3 +40,14 @@ jobs:
       with:
         name: wii-mobiclip-player
         path: artifact_root/
+
+    - name: Zip release
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
+        (cd artifact_root && zip -r "$GITHUB_WORKSPACE/wii-mobiclip-player.zip" apps)
+
+    - uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/v')
+      with:
+        files: wii-mobiclip-player.zip
