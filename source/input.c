@@ -4,7 +4,7 @@
 #include "input.h"
 
 /* Controllers, keyboard and the optional Wii U / DualShock 3 backends are
- * handled by libinput-wii; everything arrives as WPAD_BUTTON_* bits. */
+ * handled by libwiiinput; everything arrives as WPAD_BUTTON_* bits. */
 
 void input_init(void)
 {
