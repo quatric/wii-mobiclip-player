@@ -6,3 +6,4 @@ build/
 portlibs/
 .DS_Store
 .dolxz/
+build-preview/

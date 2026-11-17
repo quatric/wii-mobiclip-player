@@ -10,8 +10,17 @@ endif
 include $(DEVKITPPC)/wii_rules
 
 #---------------------------------------------------------------------------------
+# PREVIEW=1 builds the single-serving player mobipeg uses to try a video in
+# Dolphin: no browser and no update check, it plays the one file added to the
+# .dol and powers off.
+ifeq ($(PREVIEW),1)
+TARGET		:=	wii-mobiclip-player-preview
+BUILD		:=	build-preview
+NO_DOLXZ	:=	1
+else
 TARGET		:=	wii-mobiclip-player
 BUILD		:=	build
+endif
 SOURCES		:=	source libwiiinput/source
 DATA		:=	data
 INCLUDES	:=	source
@@ -21,6 +30,9 @@ CFLAGS		=	-g -O3 -Wall $(MACHDEP) $(INCLUDE)
 # Version for the update check: the release tag when CI builds one, else meta.xml
 APP_VERSION	?=	$(if $(filter refs/tags/%,$(GITHUB_REF)),$(GITHUB_REF_NAME),$(shell sed -n 's:.*<version>\(.*\)</version>.*:\1:p' $(dir $(abspath $(firstword $(MAKEFILE_LIST))))meta.xml))
 CFLAGS	+=	-DAPP_VERSION=\"$(APP_VERSION)\"
+ifeq ($(PREVIEW),1)
+CFLAGS	+=	-DMOBIPEG_PREVIEW
+endif
 CXXFLAGS	=	$(CFLAGS)
 LDFLAGS		=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 

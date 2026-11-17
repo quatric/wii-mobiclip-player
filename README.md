@@ -59,6 +59,15 @@ Produces `wii-mobiclip-player.dol` and the much smaller self-extracting
 
 The first build downloads and builds [dolxz](https://github.com/FIX94/dolxz), which needs a host C compiler and liblzma (Debian/Ubuntu: `apt-get install liblzma-dev pkg-config`; macOS: `brew install xz`). `make NO_DOLXZ=1` skips the compressed `.dol`.
 
+### Preview build
+
+`make PREVIEW=1` builds `wii-mobiclip-player-preview.dol`, the single-serving
+player [mobipeg](https://github.com/quatric/mobipeg) uses to try a video in
+Dolphin. mobipeg copies it with the video added as an extra DOL data section
+loaded at `0x91000000` (layout in `source/preview_mem.h`); the player opens it
+from memory instead of the SD card, plays it once and powers the console off,
+which also closes Dolphin started with `-b`.
+
 ### Optional controllers
 
 The normal build supports Wii Remotes, Classic Controllers and GameCube pads.

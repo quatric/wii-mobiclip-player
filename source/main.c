@@ -18,6 +18,7 @@
 #include "mobi_dec.h"
 #include "rgb_source.h"
 #include "input.h"
+#include "preview_mem.h"
 
 /* ------------------------------------------------------------------ */
 /* File browser                                                        */
@@ -494,6 +495,30 @@ int main(int argc, char **argv)
     AUDIO_Init(NULL);
     AUDIO_SetDSPSampleRate(AI_SAMPLERATE_48KHZ);
     input_init();
+
+#ifdef MOBIPEG_PREVIEW
+    /* Single-serving build: play the file this .dol carries, then power
+     * off, which ends emulation (and closes Dolphin started with -b). */
+    {
+        const char *path = preview_mount();
+
+        if (path) {
+            con_clear(); con_goto(12, 35);
+            con_printf("Loading...");
+            play_any(path);
+        } else {
+            con_clear(); con_goto(2, 2);
+            con_printf("This preview build carries no video.\n");
+            con_goto(4, 2);
+            con_printf("Press HOME to exit.");
+            while (!(input_down() & WPAD_BUTTON_HOME))
+                VIDEO_WaitVSync();
+        }
+        input_shutdown();
+        SYS_ResetSystem(SYS_POWEROFF, 0, 0);
+        return 0;
+    }
+#endif
 
     if (!fatInitDefault()) {
         con_clear(); con_goto(2, 2);

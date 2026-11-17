@@ -28,6 +28,9 @@ jobs:
     - name: Build DOL
       run: make
 
+    - name: Build the preview DOL
+      run: make PREVIEW=1
+
     - name: Package App
       run: |
         mkdir -p artifact_root/apps/wii-mobiclip-player
@@ -44,12 +47,14 @@ jobs:
       run: |
         apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
         (cd artifact_root && zip -r "$GITHUB_WORKSPACE/wii-mobiclip-player.zip" apps)
+        cp wii-mobiclip-player-preview.dol "$GITHUB_WORKSPACE/"
     - uses: actions/upload-artifact@v4
       with:
         name: release-wii-mobiclip-player
         if-no-files-found: error
         path: |
           wii-mobiclip-player.zip
+          wii-mobiclip-player-preview.dol
 
   # Every push to the default branch refreshes the "latest" release; tags like v1.2.0 also get their own release.
   release:
@@ -87,6 +92,7 @@ jobs:
             Extract wii-mobiclip-player.zip to the root of your SD card (or USB drive) and open Wii Mobiclip Player from the Homebrew Channel.
           files: |
             out/wii-mobiclip-player.zip
+            out/wii-mobiclip-player-preview.dol
       - name: Publish tagged release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
@@ -99,3 +105,4 @@ jobs:
             Extract wii-mobiclip-player.zip to the root of your SD card (or USB drive) and open Wii Mobiclip Player from the Homebrew Channel.
           files: |
             out/wii-mobiclip-player.zip
+            out/wii-mobiclip-player-preview.dol
