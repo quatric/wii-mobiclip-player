@@ -47,7 +47,6 @@ jobs:
       run: |
         apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
         (cd artifact_root && zip -r "$GITHUB_WORKSPACE/wii-mobiclip-player.zip" apps)
-        cp wii-mobiclip-player-preview.dol "$GITHUB_WORKSPACE/"
     - uses: actions/upload-artifact@v4
       with:
         name: release-wii-mobiclip-player
