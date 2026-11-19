@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3 — 2026-11-19
+
+- Input now uses libwiiinput (renamed from libinput-wii).
+- Added a single-serving preview build (`wii-mobiclip-player-preview.dol`) for trying a video in Dolphin.
+- Releases include the preview .dol alongside the Homebrew Channel zip.
+
 ## v1.2 — 2026-10-18
 
 - Checks GitHub for a newer release once at boot and says whether one is out (B skips the check). A installs it over this copy and returns to the loader; failures are quiet.
